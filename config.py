@@ -15,9 +15,10 @@ BOT_TOKEN = cast(str, os.getenv("BOT_TOKEN"))
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN not found in .env")
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b-instruct-q8_0")
-if not OLLAMA_MODEL:
-    raise ValueError("OLLAMA_MODEL is empty! Check .env")
+OPENAI_API_KEY = cast(str, os.getenv("OPENAI_API_KEY"))
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY is missing! Check .env")
 
-print(f"Loaded OLLAMA_MODEL: {OLLAMA_MODEL}")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+print(f"[DEBUG] Loaded OpenAI Model: {OPENAI_MODEL}")
