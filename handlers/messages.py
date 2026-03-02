@@ -74,7 +74,7 @@ async def handle_message(message: types.Message, bot: Bot):
 
         if len(bot_reply) > 4000:
             for chunk in [bot_reply[i:i+4000] for i in range(0, len(bot_reply), 4000)]:
-                await message.answer(chunk)
+                await message.answer(chunk, parse_mode='HTML')
                 await asyncio.sleep(0.2)
         else:
             await message.answer(bot_reply, parse_mode='HTML')
