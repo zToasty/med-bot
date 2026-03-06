@@ -7,6 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from handlers import start_router, messages_router
 
+from services.rag_service import load_knowledge_base
 
 async def main():
     logging.basicConfig(
@@ -14,6 +15,8 @@ async def main():
         format="%(asctime)s | %(levelname)7s | %(name)-20s | %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    load_knowledge_base()
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
