@@ -16,7 +16,7 @@
 
 1. **Клонируйте репозиторий:**
    ```bash
-   git clone https://github.com/твое-имя/med-bot.git
+   git clone https://github.com/zToasty/med-bot.git
    cd med-bot
    ```
 
