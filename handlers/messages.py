@@ -24,6 +24,9 @@ history: Dict[int, List[Dict[str, str]]] = defaultdict(list)
 
 is_generating: Dict[int, bool] = {}
 
+shown_evidence: Dict[int, list[str]] = defaultdict(list)
+
+
 MAX_HISTORY_MESSAGES = 40
 MAX_APPROX_TOKENS = 30000
 
@@ -42,25 +45,27 @@ def trim_history(user_history: List[Dict[str, str]]) -> List[Dict[str, str]]:
 
     return user_history
 
-async def send_evidence(message: types.Message, category: str, user_text: str) -> bool:
-    """
-    Ищет фото до/после и отправляет альбомами.
-    Возвращает True если фото нашлись и были отправлены.
-    """
-    cases = find_evidence(category or user_text)
+async def send_evidence(
+    message: types.Message,
+    category: str,
+    user_text: str,
+    exclude_cases: list[str] | None = None,
+) -> list[str]:
+    cases = find_evidence(category or user_text, exclude_cases=exclude_cases)
     if not cases:
-        return False
+        return []
 
+    shown = []
     for case in cases:
         media = [InputMediaPhoto(media=url) for url in case["images"]]
         media[0].caption = f"📸 {case['patient_case']}"
         try:
             await message.answer_media_group(media=media)
+            shown.append(case["patient_case"])
         except Exception as e:
             logger.error(f"Ошибка отправки фото для '{case['patient_case']}': {e}")
 
-    return True
-
+    return shown  # ← список, не True
 
 @router.message()
 async def handle_message(message: types.Message, bot: Bot):
@@ -103,12 +108,15 @@ async def handle_message(message: types.Message, bot: Bot):
 
         # Если LLM решила что нужны фото — отправляем альбомы
         if llm_result.get("wants_evidence"):
-            found = await send_evidence(
+            newly_shown = await send_evidence(
                 message,
                 category=llm_result.get("evidence_category", ""),
                 user_text=user_text,
+                exclude_cases=shown_evidence[user_id],
             )
-            if not found:
+            if newly_shown:
+                shown_evidence[user_id].extend(newly_shown)
+            else:
                 await message.answer("По этой процедуре фото пока не добавлены, но вы можете увидеть примеры работ на консультации или на сайте клиники 🌸")
 
     except Exception as e:
