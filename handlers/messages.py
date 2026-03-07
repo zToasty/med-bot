@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import List, Dict
 
 from aiogram import Router, types, Bot
+from aiogram.types import InputMediaPhoto
 from aiogram.utils.chat_action import ChatActionSender
 
 from llm import (
@@ -11,6 +12,8 @@ from llm import (
     fallback_response,
     SYSTEM_PROMPT,                 
 )
+from services.evidence_service import find_evidence
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,25 @@ def trim_history(user_history: List[Dict[str, str]]) -> List[Dict[str, str]]:
 
     return user_history
 
+async def send_evidence(message: types.Message, category: str, user_text: str) -> bool:
+    """
+    Ищет фото до/после и отправляет альбомами.
+    Возвращает True если фото нашлись и были отправлены.
+    """
+    cases = find_evidence(category or user_text)
+    if not cases:
+        return False
+
+    for case in cases:
+        media = [InputMediaPhoto(media=url) for url in case["images"]]
+        media[0].caption = f"📸 {case['patient_case']}"
+        try:
+            await message.answer_media_group(media=media)
+        except Exception as e:
+            logger.error(f"Ошибка отправки фото для '{case['patient_case']}': {e}")
+
+    return True
+
 
 @router.message()
 async def handle_message(message: types.Message, bot: Bot):
@@ -66,18 +88,28 @@ async def handle_message(message: types.Message, bot: Bot):
         ]
 
         async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
-            
             llm_result = await generate_reply(messages_for_llm)
-            bot_reply = llm_result["response"]
 
+        bot_reply = llm_result["response"]
         history[user_id].append({"role": "assistant", "content": bot_reply})
 
+        # Отправляем текстовый ответ
         if len(bot_reply) > 4000:
             for chunk in [bot_reply[i:i+4000] for i in range(0, len(bot_reply), 4000)]:
-                await message.answer(chunk, parse_mode='HTML')
+                await message.answer(chunk, parse_mode="Markdown")
                 await asyncio.sleep(0.2)
         else:
-            await message.answer(bot_reply, parse_mode='HTML')
+            await message.answer(bot_reply, parse_mode="Markdown")
+
+        # Если LLM решила что нужны фото — отправляем альбомы
+        if llm_result.get("wants_evidence"):
+            found = await send_evidence(
+                message,
+                category=llm_result.get("evidence_category", ""),
+                user_text=user_text,
+            )
+            if not found:
+                await message.answer("По этой процедуре фото пока не добавлены, но вы можете увидеть примеры работ на консультации или на сайте клиники 🌸")
 
     except Exception as e:
         logger.exception(f"Непредвиденная ошибка при обработке сообщения от {user_id}")

@@ -32,10 +32,14 @@ for cat, services in PRICES_DATA.items():
 
 class BotResponse(BaseModel):
     is_medical: bool = Field(..., description="True если тема медицинская/услуги")
+    wants_evidence: bool = Field(..., description="True если пользователь просит фото до/после или примеры работ")
+    evidence_category: str = Field("", description="Категория операции для поиска фото, например 'блефаропластика', 'СМАС', 'подтяжка лица'. Пустая строка если wants_evidence=False")
     response: str = Field(..., description="Текст ответа Елены")
 
 class LLMResponse(TypedDict):
     is_medical: bool
+    wants_evidence: bool
+    evidence_category: str
     response: str
 
 _RAG_TRIGGER_KEYWORDS = {
@@ -59,6 +63,10 @@ SYSTEM_PROMPT = f"""\
 1. Если спрашивают цену — бери её из списка выше. Если услуги нет в списке — предлагай консультацию.
 2. Если спрашивают про медицину/реабилитацию — используй блок "ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ" если он есть.
 3. Телефон для записи: +7 (916) 555-76-66.
+4. Если просят фото до/после, примеры работ или результаты операций — 
+   установи wants_evidence=True и укажи категорию в evidence_category 
+   (например: "MACS-lift", "блефаропластика", "подтяжка лица").
+   В ответе напиши что сейчас покажешь фото.
 """
 
 def _needs_rag(text: str) -> bool:
@@ -109,7 +117,12 @@ async def generate_reply(messages_history: List[Dict[str, str]]) -> LLMResponse:
                 output_tokens=usage.completion_tokens,
             )
             
-        return {"is_medical": parsed_data.is_medical, "response": parsed_data.response}
+        return {
+            "is_medical": parsed_data.is_medical,
+            "wants_evidence": parsed_data.wants_evidence,
+            "evidence_category": parsed_data.evidence_category,
+            "response": parsed_data.response,
+        }
 
     except Exception as e:
         logger.exception("Ошибка в LLM")
@@ -121,5 +134,7 @@ async def generate_reply(messages_history: List[Dict[str, str]]) -> LLMResponse:
 def fallback_response() -> LLMResponse:
     return {
         "is_medical": False,
-        "response": "Ой, что-то я запуталась в бумагах 😅 Повторите, пожалуйста, ваш вопрос!"
+        "wants_evidence": False,
+        "evidence_category": "",
+        "response": "Ой, я немного запуталась 🙈 Спросите еще раз, пожалуйста!"
     }

@@ -8,6 +8,8 @@ from config import BOT_TOKEN
 from handlers import start_router, messages_router, stats_router
 
 from services.rag_service import load_knowledge_base
+from services.evidence_service import load_evidence
+
 
 async def main():
     logging.basicConfig(
@@ -17,6 +19,7 @@ async def main():
     )
 
     load_knowledge_base()
+    load_evidence()
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
