@@ -34,6 +34,11 @@
    ```bash
    uv sync
 
+СБОР ДАННЫХ
+```bash
+uv run crawler/run.py
+```
+
 4. **Запуск бота:**
     ```bash
     uv run main.py
