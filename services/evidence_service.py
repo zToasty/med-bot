@@ -45,51 +45,48 @@ def load_evidence():
     logger.info(f"✅ Evidence: загружено {len(_evidence_index)} случаев из {len(kb)} категорий.")
 
 
-def find_evidence(query: str, max_cases: int = 3) -> list[dict]:
+def find_evidence(query: str, max_cases: int = 3, exclude_cases: list[str] | None = None) -> list[dict]:
     """
     Ищет релевантные случаи по ключевым словам из запроса.
     Возвращает список случаев, каждый с первыми 2 фото.
+    exclude_cases — список patient_case которые уже показывали.
     """
     if not _evidence_index:
         return []
 
+    if exclude_cases is None:
+        exclude_cases = []
+
     query_lower = query.lower()
 
-    # Синонимы для улучшения поиска
     SYNONYMS: dict[str, list[str]] = {
         "блефаропластика": ["блефаро", "веки", "веко", "глаза"],
         "смас": ["smas", "подтяжка лица", "фейслифтинг", "лифтинг лица"],
         "ринопластика": ["нос", "ринопласт"],
-        "маммопластика": ["грудь", "грудь", "маммо"],
+        "маммопластика": ["грудь", "маммо"],
         "липосакция": ["жир", "липо"],
         "подтяжка шеи": ["шея", "платизма"],
     }
 
-    # Расширяем запрос синонимами
     search_terms = [query_lower]
     for key, synonyms in SYNONYMS.items():
         if key in query_lower or any(s in query_lower for s in synonyms):
             search_terms.extend([key] + synonyms)
 
-    # Ищем совпадения по категории и названию случая
-    matched = []
-    for case in _evidence_index:
-        category_lower = case["category"].lower()
-        case_lower = case["patient_case"].lower()
+    matched = [
+        case for case in _evidence_index
+        if any(
+            term in case["category"].lower() or term in case["patient_case"].lower()
+            for term in search_terms
+        )
+        and case["patient_case"] not in exclude_cases
+    ]
 
-        if any(term in category_lower or term in case_lower for term in search_terms):
-            matched.append(case)
-
-    if not matched:
-        return []
-
-    # Берём max_cases случаев, у каждого — первые 2 фото
-    result = []
-    for case in matched[:max_cases]:
-        result.append({
+    return [
+        {
             "category": case["category"],
             "patient_case": case["patient_case"],
-            "images": case["images"][:2],  # только до и после
-        })
-
-    return result
+            "images": case["images"][:2],
+        }
+        for case in matched[:max_cases]
+    ]

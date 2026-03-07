@@ -125,6 +125,7 @@ def load_knowledge_base(force_reload: bool = False):
 
         faq_count = 0
         info_count = 0
+        review_count = 0
 
         for page in kb:
             # FAQ — храним вопрос и ответ вместе, не режем (смысловая единица)
@@ -145,7 +146,19 @@ def load_knowledge_base(force_reload: bool = False):
                     docs_to_add.append(header + ch)
                     info_count += 1
 
+            for review in page.get("reviews", []):
+                txt = (
+                    f"Отзыв о клинике, раздел «{page.get('category_name', '')}». "
+                    f"Отзыв пациента об услуге «{review['service']}». "
+                    f"Автор: {review['author']}. "
+                    f"Отзыв: {review['text']}"
+                )
+                docs_to_add.append(txt)
+                review_count += 1
+
+
         logger.info(f"  📚 FAQ: {faq_count} записей, инфо: {info_count} фрагментов")
+        logger.info(f"  ⭐ Отзывы: {review_count} записей")
 
     # --- БАТЧЕВАЯ ЗАГРУЗКА ---
     total = len(docs_to_add)

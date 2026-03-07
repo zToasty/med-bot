@@ -46,6 +46,7 @@ _RAG_TRIGGER_KEYWORDS = {
     "как", "почему", "зачем", "что такое", "расскажи", "объясни",
     "операция", "процедура", "реабилитация", "восстановление", "лечение",
     "противопоказания", "побочные", "эффект", "помогает", "болит", "боль",
+    "отзыв", "отзывы", "говорят", "пишут", "мнение", "опыт",
 }
 
 # Системный промпт с ЖЕСТКИМИ знаниями
@@ -67,6 +68,9 @@ SYSTEM_PROMPT = f"""\
    установи wants_evidence=True и укажи категорию в evidence_category 
    (например: "MACS-lift", "блефаропластика", "подтяжка лица").
    В ответе напиши что сейчас покажешь фото.
+5. Если спрашивают отзывы — используй ТОЛЬКО отзывы из блока 
+   "ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ". Никогда не выдумывай отзывы сам. 
+   Если контекста нет — скажи что сейчас уточнишь и предложи консультацию.
 """
 
 def _needs_rag(text: str) -> bool:
@@ -109,6 +113,10 @@ async def generate_reply(messages_history: List[Dict[str, str]]) -> LLMResponse:
         )
 
         parsed_data = completion.choices[0].message.parsed
+        
+        if parsed_data is None:
+            raise ValueError("LLM вернул пустой ответ")
+        
         usage = completion.usage
         if usage:
             tracker.add_chat(
@@ -128,6 +136,8 @@ async def generate_reply(messages_history: List[Dict[str, str]]) -> LLMResponse:
         logger.exception("Ошибка в LLM")
         return {
             "is_medical": False,
+            "wants_evidence": False,
+            "evidence_category": "",
             "response": "Ой, я немного запуталась 🙈 Спросите еще раз, пожалуйста!"
         }
 
