@@ -1,58 +1,40 @@
 import requests
 from bs4 import BeautifulSoup
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+USER_AGENT = "Mozilla/5.0"
+
+PRICE_SECTION_KEYWORDS = {"общая информация", "цены", "прайс", "стоимость"}
 
 
-def parse_page(url):
-    """Парсит страницу услуги (без цен)."""
+def _get_text(elem, separator=" "):
+    """Единый хелпер для извлечения текста из элемента."""
+    return elem.get_text(separator=separator, strip=True)
 
-    print(f"⏳ Парсим страницу: {url}")
 
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-    except Exception as e:
-        print(f"❌ Ошибка загрузки {url}: {e}")
-        return None
-
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # название страницы
-    h1_tag = soup.find("h1")
-    category_name = h1_tag.get_text(strip=True) if h1_tag else url.strip("/").split("/")[-1]
-
-    page_data = {
-        "url": url,
-        "category_name": category_name,
-        "faq": [],
-        "reviews": [],
-        "structured_info": {},
-        "evidence": []
-    }
-
-    # ==========================================
-    # FAQ
-    # ==========================================
+def _parse_faq(soup):
+    """Извлекает FAQ со страницы."""
+    faq = []
     faq_section = soup.find("div", id="section-faq")
 
-    if faq_section:
-        for item in faq_section.find_all("div", class_=lambda c: c and "loop-post" in c):
+    if not faq_section:
+        return faq
 
-            q_elem = item.find("div", class_="collapse-title")
-            a_elem = item.find("div", class_="collapse-content")
+    for item in faq_section.find_all("div", class_=lambda c: c and "loop-post" in c):
+        q_elem = item.find("div", class_="collapse-title")
+        a_elem = item.find("div", class_="collapse-content")
 
-            if q_elem and a_elem:
-                page_data["faq"].append({
-                    "question": q_elem.get_text(strip=True),
-                    "answer": a_elem.get_text(separator=" ", strip=True)
-                })
+        if q_elem and a_elem:
+            faq.append({
+                "question": _get_text(q_elem),
+                "answer": _get_text(a_elem)
+            })
 
-    # ==========================================
-    # ТЕКСТ
-    # ==========================================
+    return faq
+
+
+def _parse_structured_info(soup):
+    """Извлекает структурированный текстовый контент со страницы."""
     tab_contents = soup.find_all("div", class_=lambda c: c and "tab-content" in c)
 
     if not tab_contents:
@@ -68,100 +50,144 @@ def parse_page(url):
             junk.decompose()
 
         tab_title_elem = tab.find("span", class_="title")
-        current_heading = tab_title_elem.get_text(strip=True) if tab_title_elem else "Общая информация"
+        current_heading = _get_text(tab_title_elem) if tab_title_elem else "Общая информация"
 
         if current_heading not in info_dict:
             info_dict[current_heading] = []
 
         for element in tab.find_all(["h2", "h3", "p", "ul", "ol"]):
 
-            text = element.get_text(separator=" ", strip=True)
+            text = _get_text(element)
 
             if not text:
                 continue
 
             if element.name in ["h2", "h3"]:
-
                 current_heading = text
-
                 if current_heading not in info_dict:
                     info_dict[current_heading] = []
 
             elif element.name == "p":
-
-                if len(text) > 10:
+                if len(text) > 10 and text not in info_dict[current_heading]:
                     info_dict[current_heading].append(text)
 
             elif element.name in ["ul", "ol"]:
-
                 for li in element.find_all("li"):
-
-                    li_text = li.get_text(separator=" ", strip=True)
-
+                    li_text = _get_text(li)
                     if len(li_text) > 5:
-                        info_dict[current_heading].append(f"- {li_text}")
+                        item = f"- {li_text}"
+                        if item not in info_dict[current_heading]:
+                            info_dict[current_heading].append(item)
 
-    for heading, texts in info_dict.items():
-        if texts:
-            page_data["structured_info"][heading] = "\n".join(texts)
+    # Фильтрация: убираем прайс-секции и глобальные дубликаты
+    seen_globally = set()
+    structured_info = {}
 
-    # ==========================================
-    # ОТЗЫВЫ
-    # ==========================================
+    for heading in list(info_dict.keys()):
+
+        if any(kw in heading.lower() for kw in PRICE_SECTION_KEYWORDS):
+            continue
+
+        unique_texts = [t for t in info_dict[heading] if t not in seen_globally]
+        seen_globally.update(unique_texts)
+
+        if unique_texts:
+            structured_info[heading] = "\n".join(unique_texts)
+
+    return structured_info
+
+
+def _parse_reviews(soup):
+    """Извлекает отзывы со страницы."""
+    reviews = []
     reviews_section = soup.find("div", class_="list-posts list-reviews")
 
-    if reviews_section:
+    if not reviews_section:
+        return reviews
 
-        reviews = reviews_section.find_all("div", class_="loop-review")
+    for review in reviews_section.find_all("div", class_="loop-review"):
 
-        for review in reviews:
+        title_elem = review.find("div", class_="item-title")
+        author_elem = review.find("div", class_="item-author")
+        text_elem = review.find("div", class_="item-description")
 
-            title_elem = review.find("div", class_="item-title")
-            author_elem = review.find("div", class_="item-author")
-            text_elem = review.find("div", class_="item-description")
+        text = _get_text(text_elem) if text_elem else ""
 
-            title = title_elem.get_text(strip=True) if title_elem else ""
-            author = author_elem.get_text(strip=True) if author_elem else "Аноним"
-            text = text_elem.get_text(separator=" ", strip=True) if text_elem else ""
+        if len(text) > 10:
+            reviews.append({
+                "service": _get_text(title_elem) if title_elem else "",
+                "author": _get_text(author_elem) if author_elem else "Аноним",
+                "text": text
+            })
 
-            if text and len(text) > 10:
-                page_data["reviews"].append({
-                    "service": title,
-                    "author": author,
-                    "text": text
-                })
+    return reviews
 
-    # ==========================================
-    # ФОТО (КЕЙСЫ)
-    # ==========================================
-    galleries = soup.find_all("div", class_="gallery")
 
-    for gallery in galleries:
+def _parse_evidence(soup):
+    """Извлекает фото-кейсы (до/после) со страницы."""
+    evidence = []
+
+    for gallery in soup.find_all("div", class_="gallery"):
 
         patient_meta = gallery.find("div", class_="item-meta")
-
         patient_name = (
-            patient_meta.get_text(separator=" ", strip=True)
-            .replace("Пациент:", "")
-            .strip()
+            _get_text(patient_meta).replace("Пациент:", "").strip()
             if patient_meta
             else "Пример работы"
         )
 
-        unique_images = set()
-
-        for slide in gallery.find_all("li", class_="slide"):
-
-            img_url = slide.get("data-url")
-
-            if img_url:
-                unique_images.add(img_url)
+        unique_images = {
+            slide.get("data-url")
+            for slide in gallery.find_all("li", class_="slide")
+            if slide.get("data-url")
+        }
 
         if unique_images:
-            page_data["evidence"].append({
+            evidence.append({
                 "patient_case": patient_name,
                 "images": list(unique_images)
             })
+
+    return evidence
+
+
+@retry(
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    reraise=True
+)
+def _fetch(url):
+    """Загружает страницу с retry при сетевых ошибках."""
+    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=10)
+    response.raise_for_status()
+    return response
+
+
+def parse_page(url):
+    """Парсит страницу услуги (без цен)."""
+
+    print(f"⏳ Парсим страницу: {url}")
+
+    try:
+        response = _fetch(url)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Ошибка загрузки {url}: {e}")
+        return None
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    h1_tag = soup.find("h1")
+    category_name = _get_text(h1_tag) if h1_tag else url.strip("/").split("/")[-1]
+
+    page_data = {
+        "url": url,
+        "category_name": category_name,
+        "faq": _parse_faq(soup),
+        "reviews": _parse_reviews(soup),
+        "structured_info": _parse_structured_info(soup),
+        "evidence": _parse_evidence(soup)
+    }
 
     print(
         f"✅ {category_name}: FAQ({len(page_data['faq'])}), "

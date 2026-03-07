@@ -1,23 +1,36 @@
 import requests
 from bs4 import BeautifulSoup
-import json
-import os
-import time
-import random
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+USER_AGENT = "Mozilla/5.0"
+
+
+def _get_text(elem, separator=" "):
+    """Единый хелпер для извлечения текста из элемента."""
+    return elem.get_text(separator=separator, strip=True)
+
+
+@retry(
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    reraise=True
+)
+def _fetch(url):
+    """Загружает страницу с retry при сетевых ошибках."""
+    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=10)
+    response.raise_for_status()
+    return response
+
 
 def parse_prices_page(url):
     """Парсит страницу со всеми ценами и возвращает структуру цен."""
-    
+
     print(f"💰 Парсим цены: {url}")
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0'
-    }
-
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-    except Exception as e:
+        response = _fetch(url)
+    except requests.exceptions.RequestException as e:
         print(f"❌ Ошибка загрузки: {e}")
         return {}
 
@@ -25,30 +38,22 @@ def parse_prices_page(url):
 
     prices_data = {}
 
-    categories = soup.find_all('div', class_=lambda c: c and 'loop-pricelist' in c)
+    for cat in soup.find_all("div", class_=lambda c: c and "loop-pricelist" in c):
 
-    for cat in categories:
-
-        title_elem = cat.find('div', class_='item-title')
+        title_elem = cat.find("div", class_="item-title")
         if not title_elem:
             continue
 
-        category = title_elem.get_text(strip=True)
+        category = _get_text(title_elem)
 
-        services = []
-
-        for offer in cat.find_all('li'):
-
-            service_elem = offer.find('span', class_='offer-title')
-            price_elem = offer.find('span', class_='offer-value')
-
-            if not service_elem or not price_elem:
-                continue
-
-            services.append({
-                "service": service_elem.get_text(strip=True),
-                "price": " ".join(price_elem.get_text(strip=True).split())
-            })
+        services = [
+            {
+                "service": _get_text(offer.find("span", class_="offer-title")),
+                "price": " ".join(_get_text(offer.find("span", class_="offer-value")).split())
+            }
+            for offer in cat.find_all("li")
+            if offer.find("span", class_="offer-title") and offer.find("span", class_="offer-value")
+        ]
 
         if services:
             prices_data[category] = services
@@ -56,10 +61,3 @@ def parse_prices_page(url):
     print(f"✅ Найдено {len(prices_data)} категорий цен")
 
     return prices_data
-
-def save_prices(prices, filename="prices.json"):
-
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(prices, f, ensure_ascii=False, indent=2)
-
-    print(f"💾 Цены сохранены: {filename}")
