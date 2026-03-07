@@ -18,8 +18,8 @@ PRICES_PAGE_URL = "https://med-plastic.ru/pricelists/"
 # ==========================================
 CATEGORY_PAGES = [
     "https://med-plastic.ru/category/liczo/",
-    "https://med-plastic.ru/category/grud/",
-    "https://med-plastic.ru/category/telo/"
+    # "https://med-plastic.ru/category/grud/",
+    # "https://med-plastic.ru/category/telo/"
 ]
 
 

@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN
-from handlers import start_router, messages_router
+from handlers import start_router, messages_router, stats_router
 
 from services.rag_service import load_knowledge_base
 
@@ -22,7 +22,9 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(start_router)
+    dp.include_router(stats_router)
     dp.include_router(messages_router)
+    
 
     logging.info("Бот запускается...")
 
