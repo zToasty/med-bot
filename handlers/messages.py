@@ -7,12 +7,8 @@ from aiogram import Router, types, Bot
 from aiogram.types import InputMediaPhoto
 from aiogram.utils.chat_action import ChatActionSender
 
-from llm import (
-    generate_reply,          
-    fallback_response,
-    SYSTEM_PROMPT,                 
-)
-from services.evidence_service import find_evidence
+from services.llm_service import generate_reply, fallback_response
+from config import ADMIN_CHAT_ID
 
 
 logger = logging.getLogger(__name__)
@@ -36,25 +32,20 @@ def trim_history(user_history: List[Dict[str, str]]) -> List[Dict[str, str]]:
     if len(user_history) > MAX_HISTORY_MESSAGES:
         user_history = user_history[-MAX_HISTORY_MESSAGES:]
 
-    
-    total_chars = sum(len(msg["content"]) for msg in user_history)
+    total_chars = sum(len(msg.get("content") or "") for msg in user_history)
     if total_chars > MAX_APPROX_TOKENS * 4:
         while total_chars > MAX_APPROX_TOKENS * 4 and len(user_history) > 2:
             removed = user_history.pop(0)
-            total_chars -= len(removed["content"])
+            total_chars -= len(removed.get("content") or "")
 
     return user_history
 
-async def send_evidence(
-    message: types.Message,
-    category: str,
-    user_text: str,
-    exclude_cases: list[str] | None = None,
-) -> list[str]:
-    cases = find_evidence(category or user_text, exclude_cases=exclude_cases)
-    if not cases:
-        return []
 
+async def _send_evidence_photos(
+    message: types.Message,
+    cases: list[dict],
+) -> list[str]:
+    """Callback для отправки фото из tool executor."""
     shown = []
     for case in cases:
         media = [InputMediaPhoto(media=url) for url in case["images"]]
@@ -64,8 +55,8 @@ async def send_evidence(
             shown.append(case["patient_case"])
         except Exception as e:
             logger.error(f"Ошибка отправки фото для '{case['patient_case']}': {e}")
+    return shown
 
-    return shown  # ← список, не True
 
 @router.message()
 async def handle_message(message: types.Message, bot: Bot):
@@ -80,25 +71,30 @@ async def handle_message(message: types.Message, bot: Bot):
         await message.reply("Подожди, я еще дописываю предыдущий ответ... ✍️")
         return
 
-    # начали генерировать ответ
     is_generating[user_id] = True
 
     try:
         history[user_id].append({"role": "user", "content": user_text})
         history[user_id] = trim_history(history[user_id])
 
-        messages_for_llm =[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            *history[user_id],
-        ]
+        async def send_photos_fn(cases: list[dict]) -> list[str]:
+            return await _send_evidence_photos(message, cases)
 
-        async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
-            llm_result = await generate_reply(messages_for_llm)
+        async def notify_fn(text: str) -> None:
+            if ADMIN_CHAT_ID:
+                await bot.send_message(ADMIN_CHAT_ID, text)
 
-        bot_reply = llm_result["response"]
+        async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id, interval=4.0):
+            bot_reply = await generate_reply(
+                messages_history=history[user_id],
+                send_photos_fn=send_photos_fn,
+                shown_evidence=shown_evidence[user_id],
+                user_id=user_id,
+                notify_fn=notify_fn,
+            )
+
         history[user_id].append({"role": "assistant", "content": bot_reply})
 
-        # Отправляем текстовый ответ
         if len(bot_reply) > 4000:
             for chunk in [bot_reply[i:i+4000] for i in range(0, len(bot_reply), 4000)]:
                 await message.answer(chunk, parse_mode="Markdown")
@@ -106,22 +102,9 @@ async def handle_message(message: types.Message, bot: Bot):
         else:
             await message.answer(bot_reply, parse_mode="Markdown")
 
-        # Если LLM решила что нужны фото — отправляем альбомы
-        if llm_result.get("wants_evidence"):
-            newly_shown = await send_evidence(
-                message,
-                category=llm_result.get("evidence_category", ""),
-                user_text=user_text,
-                exclude_cases=shown_evidence[user_id],
-            )
-            if newly_shown:
-                shown_evidence[user_id].extend(newly_shown)
-            else:
-                await message.answer("По этой процедуре фото пока не добавлены, но вы можете увидеть примеры работ на консультации или на сайте клиники 🌸")
-
     except Exception as e:
         logger.exception(f"Непредвиденная ошибка при обработке сообщения от {user_id}")
-        await message.answer(fallback_response()["response"])
-        
+        await message.answer(fallback_response())
+
     finally:
         is_generating[user_id] = False

@@ -13,3 +13,4 @@ wheels/
 .env
 data
 chroma_db
+creds.json
