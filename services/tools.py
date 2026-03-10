@@ -139,6 +139,26 @@ async def execute_tool(
 
     if tool_name == "book_appointment":
         slot = tool_args.get("slot", "")
+        phone = tool_args.get("phone", "")
+
+        # Валидация номера телефона
+        from .validation import validate_phone
+        if not validate_phone(phone):
+            logger.warning(f"⚠️ Некорректный номер телефона от LLM: {phone}")
+            return (
+                f"Некорректный формат телефона: '{phone}'. "
+                "Пожалуйста, попроси пользователя ввести номер корректно (10-11 цифр)."
+            )
+
+        # Очистка номера перед сохранением (если валиден)
+        import re
+        clean_phone = re.sub(r'[\s\-\(\)]', '', phone)
+        if len(clean_phone) == 10:
+            clean_phone = '7' + clean_phone
+        elif clean_phone.startswith('8'):
+            clean_phone = '7' + clean_phone[1:]
+        elif clean_phone.startswith('+'):
+            clean_phone = clean_phone[1:]
 
         # Превентивная проверка: слот должен быть в списке свободных
         available = await asyncio.to_thread(get_available_slots)
@@ -157,7 +177,7 @@ async def execute_tool(
         result = await asyncio.to_thread(
             book_appointment,
             name=tool_args["name"],
-            phone=tool_args["phone"],
+            phone=clean_phone,
             service=tool_args["service"],
             slot=slot,
             user_id=user_id,
