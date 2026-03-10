@@ -14,3 +14,4 @@ wheels/
 data
 chroma_db
 creds.json
+bot_data.db

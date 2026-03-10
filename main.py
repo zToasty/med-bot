@@ -9,6 +9,7 @@ from handlers import start_router, messages_router, stats_router
 
 from services.rag_service import load_knowledge_base
 from services.evidence_service import load_evidence
+from services.history_service import init_db
 
 
 async def main():
@@ -20,6 +21,7 @@ async def main():
 
     load_knowledge_base()
     load_evidence()
+    init_db()
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())

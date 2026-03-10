@@ -2,6 +2,7 @@
 Определения инструментов (tools) и executor для OpenAI Tool Calling.
 """
 
+import asyncio
 import logging
 from typing import Callable, Awaitable
 
@@ -130,30 +131,55 @@ async def execute_tool(
             )
         return "Отправлены фото следующих случаев:\n" + "\n".join(descriptions)
     
-    if  tool_name == "get_available_slots":
-        slots = get_available_slots()
+    if tool_name == "get_available_slots":
+        slots = await asyncio.to_thread(get_available_slots)
         if slots:
             return "Свободные слоты:\n" + "\n".join(slots)
         return "Свободных слотов нет, предложи связаться по телефону."
 
     if tool_name == "book_appointment":
-        success = book_appointment(
+        slot = tool_args.get("slot", "")
+
+        # Превентивная проверка: слот должен быть в списке свободных
+        available = await asyncio.to_thread(get_available_slots)
+        if slot not in available:
+            logger.warning(f"⚠️ Попытка записи в недоступный слот: {slot}")
+            if available:
+                return (
+                    f"Слот '{slot}' недоступен для записи. "
+                    f"Свободные слоты:\n" + "\n".join(available)
+                )
+            return (
+                f"Слот '{slot}' недоступен, и свободных слотов сейчас нет. "
+                "Предложи связаться по телефону."
+            )
+
+        result = await asyncio.to_thread(
+            book_appointment,
             name=tool_args["name"],
             phone=tool_args["phone"],
             service=tool_args["service"],
-            slot=tool_args["slot"],
+            slot=slot,
             user_id=user_id,
         )
-        if success:
+
+        if result["ok"]:
             if notify_fn:
                 await notify_fn(
                     f"📅 Новая запись!\n"
                     f"Имя: {tool_args['name']}\n"
                     f"Телефон: {tool_args['phone']}\n"
                     f"Услуга: {tool_args['service']}\n"
-                    f"Слот: {tool_args['slot']}"
+                    f"Слот: {slot}"
                 )
-            return f"Запись подтверждена: {tool_args['name']} на {tool_args['slot']}"
-        return "Не удалось записать, слот уже занят или произошла ошибка."
+            return f"Запись подтверждена: {tool_args['name']} на {slot}"
+
+        # Обработка ошибок
+        error = result.get("error", "unknown")
+        if error == "slot_not_found":
+            return f"Слот '{slot}' не найден в расписании. Покажи актуальные свободные слоты."
+        if error == "slot_taken":
+            return f"Слот '{slot}' уже занят. Покажи актуальные свободные слоты."
+        return "Не удалось записать из-за технической ошибки. Предложи связаться по телефону."
 
     return f"Неизвестный инструмент: {tool_name}"
