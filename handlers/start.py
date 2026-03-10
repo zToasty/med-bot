@@ -2,7 +2,7 @@ from aiogram import Router
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 
-from handlers.messages import history
+from services.history_service import clear_history
 
 router = Router(name="start")
 
@@ -12,8 +12,7 @@ async def cmd_start(message: Message):
     user_id = message.from_user.id if message.from_user is not None else 0
 
     # Очищаем историю общения при команде /start
-    if user_id in history:
-        history[user_id].clear()
+    clear_history(user_id)
 
     await message.answer(
         "Привет! 👋\n\n"

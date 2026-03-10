@@ -9,6 +9,7 @@ dependencies = [
     "beautifulsoup4>=4.14.3",
     "chromadb>=1.5.2",
     "dotenv>=0.9.9",
+    "gspread>=6.2.1",
     "httpx>=0.28.1",
     "lxml>=6.0.2",
     "ollama>=0.6.1",
